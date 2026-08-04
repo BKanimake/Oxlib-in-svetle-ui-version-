@@ -27,7 +27,7 @@ RegisterCommand('radio', function()
     -- For now, allow it to open to see UI
     ToggleRadio(not isRadioOpen)
 end, false)
-KeyMapping('radio', 'Open Radio', 'keyboard', 'F5') -- Default key F5
+RegisterKeyMapping('radio', 'Open Radio', 'keyboard', 'F5') -- Default key F5
 
 exports('OpenRadio', function()
     ToggleRadio(true)
