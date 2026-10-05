@@ -1,12 +1,30 @@
 local isRiding = false
 local currentRide = nil
 local rideCam = nil
+local currentCamIndex = 1
 
 -- Display help notification standard
 local function ShowHelpNotification(msg)
     BeginTextCommandDisplayHelp("STRING")
     AddTextComponentSubstringPlayerName(msg)
     EndTextCommandDisplayHelp(0, false, true, -1)
+end
+
+-- Camera creation & attachment helper
+local function SetRideCameraMode(ped, ride, camIndex)
+    if not ride or not ride.cameras or #ride.cameras == 0 then return end
+
+    local camConfig = ride.cameras[camIndex]
+    if not camConfig then return end
+
+    if not rideCam then
+        rideCam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
+    end
+
+    AttachCamToEntity(rideCam, ped, camConfig.offset.x, camConfig.offset.y, camConfig.offset.z, true)
+    SetCamRot(rideCam, camConfig.rot.x, camConfig.rot.y, camConfig.rot.z, 2)
+    SetCamActive(rideCam, true)
+    RenderScriptCams(true, true, 500, true, true)
 end
 
 -- 0.00ms Main Optimization Thread
@@ -48,6 +66,7 @@ RegisterNetEvent('delperro_pier:cl_startRide', function(rideId)
 
     isRiding = true
     currentRide = rideId
+    currentCamIndex = 1
 
     local playerPed = PlayerPedId()
     DoScreenFadeOut(500)
@@ -57,25 +76,39 @@ RegisterNetEvent('delperro_pier:cl_startRide', function(rideId)
     SetEntityCoords(playerPed, ride.entryCoords.x, ride.entryCoords.y, ride.entryCoords.z, false, false, false, false)
     FreezeEntityPosition(playerPed, true)
 
-    -- Setup cinematic camera if available
-    rideCam = CreateCam("DEFAULT_SCRIPTED_CAMERA", true)
-    SetCamCoord(rideCam, ride.entryCoords.x, ride.entryCoords.y, ride.entryCoords.z + 2.0)
-    SetCamRot(rideCam, 0.0, 0.0, 0.0, 2)
-    SetCamActive(rideCam, true)
-    RenderScriptCams(true, true, 500, true, true)
+    -- Play hands-up / story mode ride anim
+    RequestAnimDict("anim@arena@celeb@flat@solo@no_hands@")
+    while not HasAnimDictLoaded("anim@arena@celeb@flat@solo@no_hands@") do
+        Wait(10)
+    end
+    TaskPlayAnim(playerPed, "anim@arena@celeb@flat@solo@no_hands@", "cheering_a", 8.0, -8.0, -1, 1, 0, false, false, false)
+
+    -- Setup initial Story Mode camera view attached to player body
+    SetRideCameraMode(playerPed, ride, currentCamIndex)
 
     DoScreenFadeIn(500)
 
-    -- Ride interaction thread during ride
+    -- Ride interaction & multi-camera switch thread
     CreateThread(function()
         local startTime = GetGameTimer()
         local durationMs = (ride.duration or 30) * 1000
 
         while isRiding and (GetGameTimer() - startTime < durationMs) do
             Wait(0)
-            ShowHelpNotification("Press ~INPUT_CELLPHONE_CANCEL~ or ~INPUT_VEH_EXIT~ to exit ride early")
+            local currentCamName = ride.cameras[currentCamIndex] and ride.cameras[currentCamIndex].name or "Camera"
+            ShowHelpNotification("Press ~INPUT_NEXT_CAMERA~ to change camera [" .. currentCamName .. "] | ~INPUT_CELLPHONE_CANCEL~ or ~INPUT_VEH_EXIT~ to exit")
 
-            if IsControlJustReleased(0, 177) or IsControlJustReleased(0, 23) then -- Backspace / F / Enter vehicle exit
+            -- Cycle Camera View on [V] / INPUT_NEXT_CAMERA (control 0 or 26)
+            if IsControlJustReleased(0, 0) or IsControlJustReleased(0, 26) then
+                currentCamIndex = currentCamIndex + 1
+                if currentCamIndex > #ride.cameras then
+                    currentCamIndex = 1
+                end
+                SetRideCameraMode(playerPed, ride, currentCamIndex)
+            end
+
+            -- Exit Early on Backspace / F / Exit Key
+            if IsControlJustReleased(0, 177) or IsControlJustReleased(0, 23) then
                 break
             end
         end
@@ -97,6 +130,8 @@ RegisterNetEvent('delperro_pier:cl_exitRide', function(rideId)
         DestroyCam(rideCam, false)
         rideCam = nil
     end
+
+    ClearPedTasks(playerPed)
 
     if ride and ride.exitCoords then
         SetEntityCoords(playerPed, ride.exitCoords.x, ride.exitCoords.y, ride.exitCoords.z, false, false, false, false)
